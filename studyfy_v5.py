@@ -48,7 +48,14 @@ def parse_ppt_multimodal(file_bytes):
                     find_shapes(shape.shapes)
                 if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
                     try:
-                        slide_images.append(shape.image.blob)
+                        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                            slide_images.append(shape.image.blob)
+                        elif shape.shape_type == MSO_SHAPE_TYPE.PLACEHOLDER:
+                            if hasattr(shape, 'image') and shape.image:
+                                slide_images.append(shape.image.blob)
+                    except Exception as e:
+                        print(f"WARNING: Skipping one image on slide {i+1} due to parser error: {e}")
+                        pass         
                     # --- FIX: Changed to bare 'except' to catch WMF errors ---
                     except: pass
                 if shape.shape_type == MSO_SHAPE_TYPE.PLACEHOLDER:
@@ -331,4 +338,5 @@ def main():
 # Run the app
 if __name__ == "__main__":
     main()
+
 
