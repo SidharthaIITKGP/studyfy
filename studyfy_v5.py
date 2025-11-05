@@ -131,9 +131,9 @@ def get_gemini_explanation(llm, slide_data, detail_level, include_images, prev_s
         response = llm.invoke([human_message])
         return response.content
     except Exception as e:
-    # Show a non-blocking warning in the sidebar
-    st.sidebar.warning(f"Skipped Slide {slide_data['slide_number']}: {e}", icon="⚠️")
-    return None # Return None on failure
+        # Show a non-blocking warning in the sidebar
+        st.sidebar.warning(f"Skipped Slide {slide_data['slide_number']}: {e}", icon="⚠️")
+        return None # Return None on failure
 
 # --- 3. Download Formatter ---
 
@@ -318,5 +318,6 @@ def main():
 # Run the app
 if __name__ == "__main__":
     main()
+
 
 
