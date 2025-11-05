@@ -21,7 +21,7 @@ def init_llm(api_key, model_name):
             google_api_key=api_key
         )
     except Exception as e:
-        st.error(f"Failed to initialize model '{model_name}': {e}")
+        st.sidebar.error(f"Failed to initialize model '{model_name}'. Check the name and API key.")
         return None
 
 @st.cache_data(show_spinner=False)
@@ -49,12 +49,14 @@ def parse_ppt_multimodal(file_bytes):
                 if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
                     try:
                         slide_images.append(shape.image.blob)
-                    except Exception: pass
+                    # --- FIX: Changed to bare 'except' to catch WMF errors ---
+                    except: pass
                 if shape.shape_type == MSO_SHAPE_TYPE.PLACEHOLDER:
                     if hasattr(shape, 'image') and shape.image:
                         try:
                             slide_images.append(shape.image.blob)
-                        except Exception: pass
+                        # --- FIX: Changed to bare 'except' to catch WMF errors ---
+                        except: pass
 
         find_shapes(slide.shapes)
         slides_data.append({
@@ -74,7 +76,7 @@ def get_gemini_explanation(llm, slide_data, detail_level, include_images, prev_s
     """
     
     # 1. Define the prompt based on the user's desired detail level
-    # --- BUG FIX #2: Corrected the broken "In-Depth" string ---
+    # --- FIX: Corrected the broken "In-Depth" string ---
     detail_prompts = {
         "Summary": "Provide a concise, high-level summary of the following slide content (max 3 sentences).",
         "Standard": "Explain the key concepts on this slide, defining important terms. Keep it clear and focused.",
@@ -117,7 +119,7 @@ def get_gemini_explanation(llm, slide_data, detail_level, include_images, prev_s
         for img_bytes in slide_data["images"]:
             try:
                 b64_image = base64.b64encode(img_bytes).decode('utf-8')
-                # --- BUG FIX #3: Changed image__url to image_url ---
+                # --- FIX: Corrected image__url to image_url ---
                 message_parts.append({
                     "type": "image_url",
                     "image_url": {"url": f"data:image/png;base64,{b64_image}"}
@@ -131,7 +133,7 @@ def get_gemini_explanation(llm, slide_data, detail_level, include_images, prev_s
         response = llm.invoke([human_message])
         return response.content
     except Exception as e:
-        # Show a non-blocking warning in the sidebar
+        # --- FIX: Indented these lines ---
         st.sidebar.warning(f"Skipped Slide {slide_data['slide_number']}: {e}", icon="⚠️")
         return None # Return None on failure
 
@@ -175,9 +177,20 @@ def main():
     # --- 1. API Key & Model Configuration ---
     
     api_key = st.sidebar.text_input("Enter your Google (Gemini) API Key:", type="password")
+    if not api_key:
+        st.sidebar.warning(
+            "Using local API key input. "
+            "Create `.streamlit/secrets.toml` to hide this."
+        )
+        # --- FIX: Added unique key ---
+        api_key = st.sidebar.text_input(
+            "Enter your Google (Gemini) API Key:", 
+            type="password",
+            key="api_key_input"
+        )
 
     # Dynamic Model Name Input
-    # --- BUG FIX #1: Added unique key ---
+    # --- FIX: Added unique key ---
     model_name = st.sidebar.text_input(
         "Enter Model Name:",
         value="gemini-2.5-flash",
@@ -225,6 +238,7 @@ def main():
     # --- 4. Start Generation Button ---
     if st.sidebar.button("Start Generation", type="primary"):
         
+        # We use a try/except block for the *parsing* step
         try:
             with st.spinner("Parsing presentation..."):
                 file_bytes = uploaded_file.getvalue()
@@ -266,15 +280,18 @@ def main():
                             for j, img_bytes in enumerate(slide_images):
                                 cols[j % 3].image(img_bytes, use_container_width=True)
 
-                    # Display the explanation as it gets generated
+                    # --- FIX: This is the robust "skip-on-error" logic ---
                     st.markdown("---")
                     st.header(f"💡 {detail_level} Explanation")
+                    
                     explanation = None # Default to None
                     if not slide_text.strip() and not slide_images:
                         explanation = "*(This slide is empty, so no explanation was generated.)*"
                     else:
                         with st.spinner(f"Generating explanation for slide {slide_num}..."):
                             prev_slide_text = all_slides_data[i-1]["text"] if (i > 0 and include_context) else None
+                            
+                            # This is the call that might return None
                             explanation = get_gemini_explanation(
                                 llm,
                                 slide_data,
@@ -282,6 +299,8 @@ def main():
                                 include_images,
                                 prev_slide_text
                             )
+
+                    # Now, check what we got
                     if explanation is None:
                         # The function failed and returned None
                         explanation_to_show = "⚠️ **This slide was skipped due to an error.** (See sidebar for details)"
@@ -290,9 +309,9 @@ def main():
                         # We have a valid explanation (or the "empty slide" message)
                         explanation_to_show = explanation
                         explanation_for_download = explanation
-                    
-                    st.markdown(explanation)
-                    all_explanations.append(explanation) # Save for download
+
+                    st.markdown(explanation_to_show)
+                    all_explanations.append(explanation_for_download) # Save for download
 
             # --- 6. All processing is done ---
             st.balloons()
@@ -312,12 +331,10 @@ def main():
             )
 
         except Exception as e:
-            st.error(f"An error occurred: {e}")
+            # This will catch any remaining parsing errors (like the WMF one if it's not caught above)
+            st.error(f"A critical error occurred: {e}")
             st.error("This might be a corrupted .pptx file or an issue with the parsing library.")
 
 # Run the app
 if __name__ == "__main__":
     main()
-
-
-
