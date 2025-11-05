@@ -131,8 +131,9 @@ def get_gemini_explanation(llm, slide_data, detail_level, include_images, prev_s
         response = llm.invoke([human_message])
         return response.content
     except Exception as e:
-        st.error(f"An error occurred while calling the Gemini API: {str(e)}")
-        return f"Error processing slide {slide_data['slide_number']}: {str(e)}"
+    # Show a non-blocking warning in the sidebar
+    st.sidebar.warning(f"Skipped Slide {slide_data['slide_number']}: {e}", icon="⚠️")
+    return None # Return None on failure
 
 # --- 3. Download Formatter ---
 
@@ -268,7 +269,7 @@ def main():
                     # Display the explanation as it gets generated
                     st.markdown("---")
                     st.header(f"💡 {detail_level} Explanation")
-                    
+                    explanation = None # Default to None
                     if not slide_text.strip() and not slide_images:
                         explanation = "*(This slide is empty, so no explanation was generated.)*"
                     else:
@@ -281,6 +282,14 @@ def main():
                                 include_images,
                                 prev_slide_text
                             )
+                    if explanation is None:
+                        # The function failed and returned None
+                        explanation_to_show = "⚠️ **This slide was skipped due to an error.** (See sidebar for details)"
+                        explanation_for_download = "*(Slide skipped due to processing error)*"
+                    else:
+                        # We have a valid explanation (or the "empty slide" message)
+                        explanation_to_show = explanation
+                        explanation_for_download = explanation
                     
                     st.markdown(explanation)
                     all_explanations.append(explanation) # Save for download
@@ -309,4 +318,5 @@ def main():
 # Run the app
 if __name__ == "__main__":
     main()
+
 
