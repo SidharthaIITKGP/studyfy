@@ -176,7 +176,18 @@ def main():
 
     # --- 1. API Key & Model Configuration ---
     
-    api_key = st.sidebar.text_input("Enter your Google (Gemini) API Key:", type="password",key="api_key_input")
+    api_key = st.sidebar.text_input("Enter your Google (Gemini) API Key:", type="password")
+    if not api_key:
+        st.sidebar.warning(
+            "Using local API key input. "
+            "Create `.streamlit/secrets.toml` to hide this."
+        )
+        # --- FIX: Added unique key ---
+        api_key = st.sidebar.text_input(
+            "Enter your Google (Gemini) API Key:", 
+            type="password",
+            key="api_key_input"
+        )
 
     # Dynamic Model Name Input
     # --- FIX: Added unique key ---
@@ -327,4 +338,3 @@ def main():
 # Run the app
 if __name__ == "__main__":
     main()
-
