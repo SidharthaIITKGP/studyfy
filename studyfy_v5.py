@@ -179,7 +179,7 @@ def main():
     # --- BUG FIX #1: Added unique key ---
     model_name = st.sidebar.text_input(
         "Enter Model Name:",
-        value="gemini-1.5-pro-latest",
+        value="gemini-2.5-flash",
         help="e.g., 'gemini-1.5-pro-latest', 'gemini-pro-vision'",
         key="model_name_input"
     )
@@ -309,3 +309,4 @@ def main():
 # Run the app
 if __name__ == "__main__":
     main()
+
