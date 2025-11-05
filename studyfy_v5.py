@@ -7,15 +7,22 @@ import io
 import base64
 import os
 
-# --- 1. Caching Functions ---
+# --- 1. Caching & Parsing Functions ---
 
 @st.cache_resource
-def init_llm(api_key):
-    """Initializes the Gemini LLM."""
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.5-pro",
-        google_api_key=api_key
-    )
+def init_llm(api_key, model_name):
+    """
+    Initializes the Gemini LLM based on the user-provided model name.
+    Caches the connection for that specific model name.
+    """
+    try:
+        return ChatGoogleGenerativeAI(
+            model=model_name,
+            google_api_key=api_key
+        )
+    except Exception as e:
+        st.error(f"Failed to initialize model '{model_name}': {e}")
+        return None
 
 @st.cache_data(show_spinner=False)
 def parse_ppt_multimodal(file_bytes):
@@ -67,6 +74,7 @@ def get_gemini_explanation(llm, slide_data, detail_level, include_images, prev_s
     """
     
     # 1. Define the prompt based on the user's desired detail level
+    # --- BUG FIX #2: Corrected the broken "In-Depth" string ---
     detail_prompts = {
         "Summary": "Provide a concise, high-level summary of the following slide content (max 3 sentences).",
         "Standard": "Explain the key concepts on this slide, defining important terms. Keep it clear and focused.",
@@ -109,6 +117,7 @@ def get_gemini_explanation(llm, slide_data, detail_level, include_images, prev_s
         for img_bytes in slide_data["images"]:
             try:
                 b64_image = base64.b64encode(img_bytes).decode('utf-8')
+                # --- BUG FIX #3: Changed image__url to image_url ---
                 message_parts.append({
                     "type": "image_url",
                     "image_url": {"url": f"data:image/png;base64,{b64_image}"}
@@ -125,68 +134,78 @@ def get_gemini_explanation(llm, slide_data, detail_level, include_images, prev_s
         st.error(f"An error occurred while calling the Gemini API: {str(e)}")
         return f"Error processing slide {slide_data['slide_number']}: {str(e)}"
 
-# --- 3. Main Streamlit App ---
+# --- 3. Download Formatter ---
+
+def format_explanations_for_download(slides_data, explanations, ppt_name):
+    """
+    Combines all SLIDE text and any GENERATED explanations into a single string.
+    """
+    output = [f"STUDY GUIDE FOR: {ppt_name}\n"]
+    output.append("=" * 40 + "\n\n")
+    
+    for i, slide in enumerate(slides_data):
+        output.append(f"--- SLIDE {slide['slide_number']} ---\n")
+        
+        if slide['text']:
+            output.append("[Slide Text]\n")
+            output.append(slide['text'])
+            output.append("\n" + "-" * 20 + "\n")
+        
+        output.append("[Explanation]\n")
+        if i < len(explanations):
+            output.append(explanations[i])
+        else:
+            output.append("[Explanation not yet generated.]")
+            
+        output.append("\n\n" + "=" * 40 + "\n\n")
+        
+    return "\n".join(output)
+
+# --- 4. Main Streamlit App ---
 
 def main():
     st.set_page_config(
-        page_title="Studyfy v5",
+        page_title="Studyfy (Streaming Version)",
         layout="wide",
         initial_sidebar_state="expanded"
     )
+    st.sidebar.title("Studyfy")
 
-    st.sidebar.title("Studyfy 5.0")
-
-    # 1. API Key (works locally with .streamlit/secrets.toml)
+    # --- 1. API Key & Model Configuration ---
+    
     api_key = st.sidebar.text_input("Enter your Google (Gemini) API Key:", type="password")
 
-    # 2. File Uploader
+    # Dynamic Model Name Input
+    # --- BUG FIX #1: Added unique key ---
+    model_name = st.sidebar.text_input(
+        "Enter Model Name:",
+        value="gemini-1.5-pro-latest",
+        help="e.g., 'gemini-1.5-pro-latest', 'gemini-pro-vision'",
+        key="model_name_input"
+    )
+
+    # --- 2. File Uploader ---
     uploaded_file = st.sidebar.file_uploader(
         "Upload your PowerPoint", 
         type="pptx",
         help="Upload a .pptx file to begin."
     )
     
-    # --- Session State Initialization ---
-    if 'explanations' not in st.session_state:
-        # 'explanations' is now a dictionary.
-        # The KEY will be a unique string based on the settings (e.g., "slide_5_In-Depth_True_True")
-        # The VALUE will be the generated text.
-        st.session_state.explanations = {}
-    if 'parsed_slides' not in st.session_state:
-        st.session_state.parsed_slides = []
-    if 'current_file_id' not in st.session_state:
-        st.session_state.current_file_id = None
-
-    # --- 3. Handle File Upload ---
     if not uploaded_file:
         st.info("Upload a .pptx file in the sidebar to get started.")
         return
 
-    if not api_key:
-        st.error("GOOGLE_API_KEY not found in Streamlit Secrets.")
-        return
-
-    # Check if this is a new file. If so, clear old data.
-    file_id = uploaded_file.file_id
-    if st.session_state.current_file_id != file_id:
-        with st.spinner("Parsing presentation..."):
-            file_bytes = uploaded_file.getvalue()
-            st.session_state.parsed_slides = parse_ppt_multimodal(file_bytes)
-            st.session_state.explanations = {} # Clear old explanations
-            st.session_state.current_file_id = file_id
-            st.rerun() # Rerun to update the radio button
-
-    if not st.session_state.parsed_slides:
-        st.error("There was an error parsing the presentation. Please try again.")
+    if not api_key or not model_name:
+        st.error("Please enter your API Key and a Model Name in the sidebar.")
         return
         
-    # --- 4. ADDED BACK: Analysis Options ---
+    # --- 3. Analysis Options ---
     st.sidebar.header("Analysis Options")
     
     detail_level = st.sidebar.radio(
         "Level of Detail",
         ["Summary", "Standard", "In-Depth"],
-        index=2, # Default to "In-Depth"
+        index=2, 
         help="Choose how detailed you want the explanation to be."
     )
     
@@ -202,81 +221,90 @@ def main():
         help="Provide text from the previous slide to the AI for better context."
     )
 
-    # --- 5. Sidebar Navigation ---
-    st.sidebar.header("Slide Navigation")
-    slide_titles = [f"Slide {s['slide_number']}" for s in st.session_state.parsed_slides]
-    
-    selected_index = st.sidebar.radio(
-        "Select a slide:",
-        options=range(len(slide_titles)),  # Use index as the value
-        format_func=lambda x: slide_titles[x], # Show "Slide X" as the label
-        key='selected_index'
-    )
-    
-    current_slide = st.session_state.parsed_slides[selected_index]
-    
-    # --- 6. Main Page Display ---
-    
-    st.title(f"Slide {current_slide['slide_number']}")
-    
-    # --- Raw Content Expander ---
-    with st.expander("View Raw Slide Content", expanded=False):
-        st.markdown("**Extracted Text:**")
-        if current_slide["text"]:
-            st.text(current_slide["text"])
-        else:
-            st.info("This slide contains no extractable text.")
+    # --- 4. Start Generation Button ---
+    if st.sidebar.button("Start Generation", type="primary"):
         
-        st.markdown("**Extracted Images:**")
-        if current_slide["images"]:
-            cols = st.columns(min(len(current_slide["images"]), 3)) 
-            for i, img_bytes in enumerate(current_slide["images"]):
-                cols[i % 3].image(
-                    img_bytes, 
-                    use_container_width=True,
-                    caption=f"Image {i+1}"
-                )
-        else:
-            st.info("This slide contains no extractable images.")
+        try:
+            with st.spinner("Parsing presentation..."):
+                file_bytes = uploaded_file.getvalue()
+                all_slides_data = parse_ppt_multimodal(file_bytes)
+                llm = init_llm(api_key, model_name)
+            
+            if not llm:
+                st.error("Model initialization failed. Please check the model name.")
+                return
 
-    # --- 7. Smart "Generate-on-Select" Logic ---
-    st.markdown("---")
-    st.header(f"💡 {detail_level} Explanation")
-    
-    # Create a unique key based on slide AND settings
-    explanation_key = (
-        f"{st.session_state.current_file_id}_{selected_index}_"
-        f"{detail_level}_{include_images}_{include_context}"
-    )
-    
-    # Check if we have ALREADY generated this exact explanation
-    if explanation_key in st.session_state.explanations:
-        # Yes: Just display it instantly
-        st.markdown(st.session_state.explanations[explanation_key])
-    else:
-        # No: Generate it now, save it, and then display it
-        with st.spinner(f"Generating {detail_level} explanation for slide {current_slide['slide_number']}..."):
-            llm = init_llm(api_key)
+            st.success(f"Successfully parsed {len(all_slides_data)} slides. Generating explanations...")
+            st.markdown("---")
+            st.title("Generated Explanations")
             
-            # Get previous slide text for context (if toggled)
-            prev_slide_text = None
-            if include_context and selected_index > 0:
-                prev_slide_text = st.session_state.parsed_slides[selected_index - 1]["text"]
+            all_explanations = []
+
+            # --- 5. "Streaming" Logic with Dropdowns ---
+            for i, slide_data in enumerate(all_slides_data):
+                slide_num = slide_data["slide_number"]
+                slide_text = slide_data["text"]
+                slide_images = slide_data["images"]
+                
+                # Create one dropdown for *everything* related to this slide
+                with st.expander(f"**Slide {slide_num}** - Click to expand/collapse"):
+
+                    # Inner expander for the raw content
+                    with st.expander("View Raw Slide Content"):
+                        st.markdown("**Extracted Text:**")
+                        if not slide_text.strip():
+                            st.write("This slide contains no text.")
+                        else:
+                            st.text(slide_text)
+                        
+                        st.markdown("**Extracted Images:**")
+                        if not slide_images:
+                            st.write("This slide contains no images.")
+                        else:
+                            cols = st.columns(min(len(slide_images), 3))
+                            for j, img_bytes in enumerate(slide_images):
+                                cols[j % 3].image(img_bytes, use_container_width=True)
+
+                    # Display the explanation as it gets generated
+                    st.markdown("---")
+                    st.header(f"💡 {detail_level} Explanation")
+                    
+                    if not slide_text.strip() and not slide_images:
+                        explanation = "*(This slide is empty, so no explanation was generated.)*"
+                    else:
+                        with st.spinner(f"Generating explanation for slide {slide_num}..."):
+                            prev_slide_text = all_slides_data[i-1]["text"] if (i > 0 and include_context) else None
+                            explanation = get_gemini_explanation(
+                                llm,
+                                slide_data,
+                                detail_level,
+                                include_images,
+                                prev_slide_text
+                            )
+                    
+                    st.markdown(explanation)
+                    all_explanations.append(explanation) # Save for download
+
+            # --- 6. All processing is done ---
+            st.balloons()
+            st.success("All slides processed! You can now download the full study guide.")
             
-            # Call the LLM with all the options
-            explanation = get_gemini_explanation(
-                llm,
-                current_slide,
-                detail_level,
-                include_images,
-                prev_slide_text
+            # --- 7. Add Download Button ---
+            file_data = format_explanations_for_download(
+                all_slides_data,
+                all_explanations,
+                uploaded_file.name
             )
-            
-            # Save to session state for next time
-            st.session_state.explanations[explanation_key] = explanation
-            
-            # Display it
-            st.markdown(explanation)
+            st.sidebar.download_button(
+                label="Download Study Guide (.txt)",
+                data=file_data,
+                file_name=f"{uploaded_file.name.split('.')[0]}_Study_Guide.txt",
+                mime="text/plain"
+            )
+
+        except Exception as e:
+            st.error(f"An error occurred: {e}")
+            st.error("This might be a corrupted .pptx file or an issue with the parsing library.")
 
 # Run the app
 if __name__ == "__main__":
