@@ -176,18 +176,25 @@ def main():
 
     # --- 1. API Key & Model Configuration ---
     
-    api_key = st.sidebar.text_input("Enter your Google (Gemini) API Key:", type="password")
-    if not api_key:
-        st.sidebar.warning(
+    try:
+    # Try to get the key from Streamlit Cloud secrets
+        api_key = st.secrets.get("GOOGLE_API_KEY")
+    except st.errors.StreamlitAPIException as e:
+    # This handles the "No secrets found" error when running locally
+        if "No secrets found" in str(e):
+            st.sidebar.warning(
             "Using local API key input. "
             "Create `.streamlit/secrets.toml` to hide this."
         )
-        # --- FIX: Added unique key ---
-        api_key = st.sidebar.text_input(
+            api_key = st.sidebar.text_input(
             "Enter your Google (Gemini) API Key:", 
             type="password",
             key="api_key_input"
         )
+        else:
+        # Show any other secrets-related error
+            st.error(f"An error occurred with Streamlit Secrets: {e}")
+            api_key = None # Set api_key to None to stop execution
 
     # Dynamic Model Name Input
     # --- FIX: Added unique key ---
