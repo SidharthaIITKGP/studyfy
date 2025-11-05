@@ -29,6 +29,8 @@ def parse_ppt_multimodal(file_bytes):
     """
     Parses a PowerPoint file from bytes, extracting text and images
     from each slide, including grouped and placeholder shapes.
+    
+    --- UPDATED with WMF/EMF skip logic ---
     """
     pptx_file = io.BytesIO(file_bytes)
     prs = Presentation(pptx_file)
@@ -44,26 +46,35 @@ def parse_ppt_multimodal(file_bytes):
                     for paragraph in shape.text_frame.paragraphs:
                         for run in paragraph.runs:
                             slide_text.append(run.text)
+                
                 if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
                     find_shapes(shape.shapes)
-                if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-                    try:
-                        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-                            slide_images.append(shape.image.blob)
-                        elif shape.shape_type == MSO_SHAPE_TYPE.PLACEHOLDER:
-                            if hasattr(shape, 'image') and shape.image:
-                                slide_images.append(shape.image.blob)
-                    except Exception as e:
-                        print(f"WARNING: Skipping one image on slide {i+1} due to parser error: {e}")
-                        pass         
-                    # --- FIX: Changed to bare 'except' to catch WMF errors ---
-                    except: pass
-                if shape.shape_type == MSO_SHAPE_TYPE.PLACEHOLDER:
-                    if hasattr(shape, 'image') and shape.image:
-                        try:
-                            slide_images.append(shape.image.blob)
-                        # --- FIX: Changed to bare 'except' to catch WMF errors ---
-                        except: pass
+                
+                # --- START NEW ROBUST IMAGE LOGIC ---
+                try:
+                    image_data = None
+                    if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                        image_data = shape.image
+                    elif shape.shape_type == MSO_SHAPE_TYPE.PLACEHOLDER:
+                        if hasattr(shape, 'image') and shape.image:
+                            image_data = shape.image
+                    
+                    if image_data:
+                        # Check content type BEFORE trying to access the blob.
+                        # WMF is 'image/x-wmf'. EMF is 'image/x-emf'.
+                        content_type = image_data.content_type.lower()
+                        if 'wmf' in content_type or 'emf' in content_type:
+                            # Log to console that we skipped it (won't show in UI)
+                            print(f"Skipping unsupported image (WMF/EMF) on slide {i+1}")
+                        else:
+                            # This is a safe image (PNG, JPEG), so add it
+                            slide_images.append(image_data.blob)
+                            
+                except Exception as e:
+                    # Catch-all for any other unexpected image parsing error
+                    print(f"WARNING: Skipping one image on slide {i+1} due to parser error: {e}")
+                    pass
+                # --- END NEW ROBUST IMAGE LOGIC ---
 
         find_shapes(slide.shapes)
         slides_data.append({
@@ -338,5 +349,6 @@ def main():
 # Run the app
 if __name__ == "__main__":
     main()
+
 
 
